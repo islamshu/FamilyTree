@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 import { ref, onMounted, onUnmounted } from 'vue';
 
 interface FamilyMember {
@@ -472,9 +472,17 @@ const deleteMember = async () => {
                     إضافة جد
                 </button>
             </div>
-            <span class="text-sm text-slate-400"
-                >انقر على أي شخص لتعديل بياناته</span
-            >
+            <div class="flex items-center gap-3">
+                <span class="text-sm text-slate-400"
+                    >انقر على أي شخص لتعديل بياناته</span
+                >
+                <Link
+                    href="/tree-chart"
+                    class="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600"
+                >
+                    عرض مخطط الشجرة →
+                </Link>
+            </div>
         </div>
 
         <div
