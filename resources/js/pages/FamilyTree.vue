@@ -36,6 +36,7 @@ const form = ref({
 });
 
 const loading = ref(false);
+let resizeObserver: ResizeObserver | null = null;
 
 const buildTree = (flat: FamilyMember[]): FamilyMember[] => {
     const map = new Map<number, any>();
@@ -146,10 +147,15 @@ const findMember = (id: number): FamilyMember | null => {
     return search(members.value);
 };
 
-const FONT_SIZE = 18;
-const CHAR_WIDTH = FONT_SIZE * 3;
-const MIN_LEVEL_WIDTH = 150;
-const CHART_PADDING = 120;
+const isMobile = () => (chartContainer.value?.clientWidth ?? window.innerWidth) < 640;
+const FONT_SIZE_DESKTOP = 18;
+const FONT_SIZE_MOBILE = 11;
+const getFontSize = () => (isMobile() ? FONT_SIZE_MOBILE : FONT_SIZE_DESKTOP);
+const CHAR_WIDTH_DESKTOP = FONT_SIZE_DESKTOP * 3;
+const CHAR_WIDTH_MOBILE = FONT_SIZE_MOBILE * 2.5;
+const getCharWidth = () => (isMobile() ? CHAR_WIDTH_MOBILE : CHAR_WIDTH_DESKTOP);
+const MIN_LEVEL_WIDTH = 80;
+const CHART_PADDING = 60;
 
 const getMaxNameLengthPerLevel = (
     nodes: any[],
@@ -168,13 +174,15 @@ const getMaxNameLengthPerLevel = (
 
 const generateLevels = (maxNamePerLevel: Map<number, number>) => {
     const levels: any[] = [{}];
+    const charWidth = getCharWidth();
+    const fontSize = getFontSize();
 
     let totalPixels = 0;
     const widths: number[] = [];
     for (let i = 1; i <= maxNamePerLevel.size; i++) {
         const maxChars = maxNamePerLevel.get(i) || 1;
         const width = Math.max(
-            maxChars * CHAR_WIDTH + CHART_PADDING,
+            maxChars * charWidth + CHART_PADDING,
             MIN_LEVEL_WIDTH,
         );
         widths.push(width);
@@ -193,7 +201,7 @@ const generateLevels = (maxNamePerLevel: Map<number, number>) => {
             label: {
                 rotate: 'tangential',
                 color: '#fff',
-                fontSize: FONT_SIZE,
+                fontSize,
                 show: true,
                 overflow: 'break',
                 formatter: '{b}',
@@ -221,7 +229,6 @@ const initChart = async () => {
     chart.on('click', (params: any) => {
         if (params.name && params.name !== 'لا توجد بيانات') {
             const m = findMember(params.data.id);
-            // console.log(m);
             if (m?.id) {
                 selectedMember.value = m;
             }
@@ -230,7 +237,8 @@ const initChart = async () => {
         }
     });
 
-    setTimeout(() => chart?.resize(), 100);
+    resizeObserver = new ResizeObserver(() => chart?.resize());
+    resizeObserver.observe(chartContainer.value);
 };
 
 const renderChart = () => {
@@ -311,7 +319,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-    window.removeEventListener('resize', () => chart?.resize());
+    resizeObserver?.disconnect();
     chart?.dispose();
     chart = null;
 });
@@ -462,23 +470,23 @@ const deleteMember = async () => {
         class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 md:p-8"
         style="font-family: 'Tajawal', sans-serif"
     >
-        <div class="mb-6 flex items-center justify-between">
-            <div class="flex items-center gap-4">
-                <h1 class="text-3xl font-bold text-white">شجرة العائلة</h1>
+        <div class="mb-6 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-3">
+                <h1 class="text-xl font-bold text-white sm:text-3xl">شجرة العائلة</h1>
                 <button
                     @click="openForm()"
-                    class="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600"
+                    class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 sm:px-4 sm:py-2"
                 >
                     إضافة جد
                 </button>
             </div>
-            <div class="flex items-center gap-3">
-                <span class="text-sm text-slate-400"
+            <div class="flex items-center gap-2">
+                <span class="hidden text-sm text-slate-400 sm:inline"
                     >انقر على أي شخص لتعديل بياناته</span
                 >
                 <Link
                     href="/tree-chart"
-                    class="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600"
+                    class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-600 sm:px-4 sm:py-2"
                 >
                     عرض مخطط الشجرة →
                 </Link>
@@ -487,30 +495,28 @@ const deleteMember = async () => {
 
         <div
             v-if="selectedMember"
-            class="mb-4 flex items-center justify-between rounded-lg bg-amber-500/20 p-3 text-amber-300"
+            class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-500/20 p-3 text-amber-300"
         >
-            <div>
-                <div class="flex items-center gap-1">
-                    <span>تم الاختيار:</span>
-                    <strong>{{ selectedMember.name }}</strong>
-                </div>
+            <div class="flex items-center gap-1">
+                <span class="text-sm">تم الاختيار:</span>
+                <strong class="text-sm">{{ selectedMember.name }}</strong>
             </div>
-            <div class="flex gap-1">
+            <div class="flex flex-wrap gap-1">
                 <button
                     @click="openFormForUpdate"
-                    class="rounded bg-emerald-500 px-3 py-1 text-sm text-white hover:bg-emerald-600"
+                    class="rounded bg-emerald-500 px-2 py-1 text-xs text-white hover:bg-emerald-600 sm:px-3 sm:text-sm"
                 >
                     تحديث البيانات
                 </button>
                 <button
                     @click="openFormForAddChild"
-                    class="rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600"
+                    class="rounded bg-blue-500 px-2 py-1 text-xs text-white hover:bg-blue-600 sm:px-3 sm:text-sm"
                 >
                     + إضافة ابن/ابنة
                 </button>
                 <button
                     @click="deleteMember"
-                    class="rounded bg-red-500 px-3 py-1 text-sm text-white hover:bg-red-600"
+                    class="rounded bg-red-500 px-2 py-1 text-xs text-white hover:bg-red-600 sm:px-3 sm:text-sm"
                 >
                     حذف
                 </button>

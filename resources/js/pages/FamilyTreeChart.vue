@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 
 interface FamilyMember {
     id?: number;
@@ -18,18 +18,35 @@ const treeData = ref<FamilyMember[]>([]);
 const selectedMember = ref<FamilyMember | null>(null);
 const chartContainer = ref<HTMLDivElement | null>(null);
 const loading = ref(true);
+const chartH = ref(window.innerHeight - 130);
+const chartW = ref(window.innerWidth);
+// tracks the deepest generation the user has expanded into
+const visibleDepth = ref(window.innerWidth < 768 ? 1 : 2);
+
+const calcDimensions = () => {
+    const mobile = window.innerWidth < 768;
+    const nodeW = mobile ? 68 : 88;
+    // connector gap: minimal on mobile, comfortable on desktop
+    const gap = mobile ? 10 : 44;
+    const containerW = chartContainer.value?.parentElement?.clientWidth ?? window.innerWidth;
+    chartH.value = window.innerHeight - 130;
+    // canvas grows only as deep as the user has opened — no extra width on first load
+    const needed = (visibleDepth.value + 1) * nodeW + visibleDepth.value * gap + 32;
+    chartW.value = Math.max(containerW, needed);
+};
 
 let echarts: any = null;
 let chart: any = null;
+let resizeObserver: ResizeObserver | null = null;
+let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+let lastMobile = window.innerWidth < 768;
 
 const buildTree = (flat: FamilyMember[]): FamilyMember[] => {
     const map = new Map<number, any>();
     const roots: any[] = [];
 
     flat.forEach((m) => {
-        if (m.id) {
-            map.set(m.id, { ...m, children: [] });
-        }
+        if (m.id) map.set(m.id, { ...m, children: [] });
     });
 
     flat.forEach((m) => {
@@ -46,14 +63,15 @@ const buildTree = (flat: FamilyMember[]): FamilyMember[] => {
     return roots;
 };
 
-const decorateNodes = (node: any): any => ({
+const decorateNodes = (node: any, d = 0): any => ({
     ...node,
+    depth: d,
     itemStyle: {
-        color: node.gender === 'male' ? '#4D96FF' : '#FF6EC7',
-        borderColor: node.gender === 'male' ? '#2563eb' : '#db2777',
-        borderWidth: 1,
+        color: node.gender === 'male' ? '#2563eb' : '#db2777',
+        borderColor: node.gender === 'male' ? '#1e40af' : '#9d174d',
+        borderWidth: 1.5,
     },
-    children: node.children?.map(decorateNodes) ?? [],
+    children: node.children?.map((c: any) => decorateNodes(c, d + 1)) ?? [],
 });
 
 const findMember = (id: number, nodes: FamilyMember[]): FamilyMember | null => {
@@ -67,6 +85,29 @@ const findMember = (id: number, nodes: FamilyMember[]): FamilyMember | null => {
     return null;
 };
 
+const triggerZoom = (delta: number) => {
+    if (!chart) return;
+    const cx = chart.getWidth() / 2;
+    const cy = chart.getHeight() / 2;
+    chart.getZr().trigger('mousewheel', {
+        zrX: cx,
+        zrY: cy,
+        wheelDelta: delta,
+        event: { preventDefault: () => {}, stopPropagation: () => {} },
+    });
+};
+
+const zoomIn = () => triggerZoom(1);
+const zoomOut = () => triggerZoom(-1);
+const resetView = () => {
+    visibleDepth.value = window.innerWidth < 768 ? 1 : 2;
+    calcDimensions();
+    nextTick(() => {
+        chart?.resize();
+        chart?.dispatchAction({ type: 'restore' });
+    });
+};
+
 const initChart = async () => {
     echarts = await import('echarts');
     if (!chartContainer.value) return;
@@ -76,16 +117,41 @@ const initChart = async () => {
     chart.on('click', (params: any) => {
         if (params.data?.id) {
             selectedMember.value = findMember(params.data.id, treeData.value);
+            // expand: if user opens a node deeper than current canvas allows, grow it
+            const d: number = params.data.depth ?? 0;
+            if (d + 1 > visibleDepth.value) {
+                visibleDepth.value = d + 1;
+                calcDimensions();
+                nextTick(() => chart?.resize());
+            }
         } else {
             selectedMember.value = null;
         }
     });
 
-    setTimeout(() => chart?.resize(), 100);
+    resizeObserver = new ResizeObserver(() => {
+        chart?.resize();
+        calcDimensions();
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            const nowMobile = window.innerWidth < 768;
+            if (nowMobile !== lastMobile) {
+                lastMobile = nowMobile;
+                renderChart();
+            }
+        }, 250);
+    });
+    resizeObserver.observe(chartContainer.value);
 };
 
 const renderChart = () => {
     if (!chart || !echarts) return;
+
+    const mobile = window.innerWidth < 768;
+    const nodeW = mobile ? 68 : 88;
+    const nodeH = mobile ? 22 : 26;
+    const fontSize = mobile ? 10 : 12;
+    const labelW = nodeW - 12;
 
     const roots = treeData.value.map(decorateNodes);
     const root =
@@ -95,17 +161,20 @@ const renderChart = () => {
                   name: 'الجذر',
                   children: roots,
                   itemStyle: {
-                      color: '#845EC2',
-                      borderColor: '#6d28d9',
-                      borderWidth: 1,
+                      color: '#7c3aed',
+                      borderColor: '#5b21b6',
+                      borderWidth: 1.5,
                   },
               };
 
     chart.setOption(
         {
-            backgroundColor: '#1a1a2e',
+            backgroundColor: '#0f172a',
             tooltip: {
                 trigger: 'item',
+                backgroundColor: '#1e293b',
+                borderColor: '#334155',
+                textStyle: { color: '#e2e8f0', fontFamily: 'Tajawal, sans-serif', fontSize: 12 },
                 formatter: (params: any) => {
                     const m = findMember(params.data.id, treeData.value);
                     if (!m) return params.name;
@@ -113,6 +182,7 @@ const renderChart = () => {
                     if (m.birth_date) html += `<br/>الميلاد: ${m.birth_date}`;
                     if (m.death_date) html += `<br/>الوفاة: ${m.death_date}`;
                     if (m.wife_name) html += `<br/>الزوجة: ${m.wife_name}`;
+                    if (m.description) html += `<br/>${m.description}`;
                     return html;
                 },
             },
@@ -120,35 +190,56 @@ const renderChart = () => {
                 {
                     type: 'tree',
                     data: [root],
-                    top: '5%',
-                    left: '5%',
-                    bottom: '5%',
-                    right: '20%',
+                    top: '2%',
+                    left: mobile ? '4%' : '6%',
+                    bottom: '2%',
+                    right: mobile ? '4%' : '6%',
                     orient: 'LR',
                     symbol: 'roundRect',
-                    symbolSize: [110, 34],
+                    symbolSize: [nodeW, nodeH],
                     roam: true,
-                    initialTreeDepth: 3,
+                    initialTreeDepth: visibleDepth.value,
+                    nodeGap: mobile ? 5 : 8,
                     label: {
                         show: true,
                         position: 'inside',
                         color: '#fff',
-                        fontSize: 13,
+                        fontSize,
                         fontFamily: 'Tajawal, sans-serif',
+                        overflow: 'truncate',
+                        width: labelW,
                         formatter: '{b}',
                     },
                     leaves: {
-                        label: { position: 'inside', color: '#fff' },
+                        label: {
+                            position: 'inside',
+                            color: '#fff',
+                            overflow: 'truncate',
+                            width: labelW,
+                        },
                     },
                     lineStyle: {
-                        color: '#7c7c9a',
+                        color: '#64748b',
                         width: 1.5,
-                        curveness: 0.5,
+                        curveness: 0.4,
                     },
-                    emphasis: { focus: 'descendant' },
+                    emphasis: {
+                        focus: 'descendant',
+                        blurScope: 'series',
+                        itemStyle: {
+                            borderWidth: 3,
+                            borderColor: '#facc15',
+                        },
+                        label: { color: '#fff', fontWeight: 'bold' },
+                    },
+                    blur: {
+                        itemStyle: { opacity: 0.3 },
+                        lineStyle: { opacity: 0.2 },
+                    },
                     expandAndCollapse: true,
-                    animationDuration: 550,
-                    animationDurationUpdate: 750,
+                    animationDuration: 300,
+                    animationDurationUpdate: 500,
+                    animationEasingUpdate: 'cubicInOut',
                 },
             ],
         },
@@ -163,6 +254,10 @@ const fetchData = async () => {
     try {
         const res = await fetch('/api/family-members');
         treeData.value = buildTree(await res.json());
+        visibleDepth.value = window.innerWidth < 768 ? 1 : 2;
+        calcDimensions();
+        await nextTick();
+        chart?.resize();
         renderChart();
     } catch (e) {
         console.error(e);
@@ -179,6 +274,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+    resizeObserver?.disconnect();
     chart?.dispose();
     chart = null;
 });
@@ -193,72 +289,78 @@ onUnmounted(() => {
     </Head>
 
     <div
-        class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 md:p-8"
+        class="min-h-screen bg-linear-to-br from-slate-900 via-purple-950 to-slate-900"
         style="font-family: 'Tajawal', sans-serif"
     >
-        <div class="mb-6 flex items-center justify-between">
-            <div class="flex items-center gap-4">
-                <h1 class="text-3xl font-bold text-white">
-                    مخطط شجرة العائلة
-                </h1>
+        <!-- Sticky header bar -->
+        <div class="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-3 backdrop-blur md:px-6">
+            <div class="flex flex-wrap items-center gap-3">
+                <h1 class="text-lg font-bold text-white sm:text-2xl">مخطط شجرة العائلة</h1>
                 <div class="flex items-center gap-3 text-sm text-slate-400">
                     <span class="flex items-center gap-1">
-                        <span
-                            class="inline-block h-3 w-3 rounded-sm bg-blue-400"
-                        ></span>
-                        ذكر
+                        <span class="inline-block h-3 w-3 rounded-sm bg-blue-500"></span>ذكر
                     </span>
                     <span class="flex items-center gap-1">
-                        <span
-                            class="inline-block h-3 w-3 rounded-sm bg-pink-400"
-                        ></span>
-                        أنثى
+                        <span class="inline-block h-3 w-3 rounded-sm bg-pink-500"></span>أنثى
                     </span>
                 </div>
             </div>
-            <Link
-                href="/"
-                class="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600"
-            >
-                ← العودة إلى المخطط الدائري
-            </Link>
+
+            <div class="flex items-center gap-1.5">
+                <button
+                    @click="zoomIn"
+                    class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700 text-lg font-bold text-white transition hover:bg-slate-600 active:scale-95"
+                    title="تكبير"
+                >+</button>
+                <button
+                    @click="zoomOut"
+                    class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700 text-lg font-bold text-white transition hover:bg-slate-600 active:scale-95"
+                    title="تصغير"
+                >−</button>
+                <button
+                    @click="resetView"
+                    class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm text-white transition hover:bg-slate-600 active:scale-95"
+                    title="إعادة ضبط العرض"
+                >⟳ إعادة ضبط</button>
+                <Link
+                    href="/"
+                    class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-600 active:scale-95"
+                >← رجوع</Link>
+            </div>
         </div>
 
+        <!-- Selected member info bar -->
         <div
             v-if="selectedMember"
-            class="mb-4 rounded-lg bg-amber-500/20 p-3 text-amber-300"
+            class="mx-4 mb-1 shrink-0 rounded-lg bg-amber-500/20 px-4 py-2 text-sm text-amber-300 md:mx-6"
         >
-            <strong>{{ selectedMember.name }}</strong>
-            <span class="mx-2 text-slate-500">|</span>
+            <strong class="text-amber-200">{{ selectedMember.name }}</strong>
+            <span class="mx-2 text-slate-600">|</span>
             {{ selectedMember.gender === 'male' ? 'ذكر' : 'أنثى' }}
             <template v-if="selectedMember.birth_date">
-                <span class="mx-2 text-slate-500">|</span>
-                الميلاد: {{ selectedMember.birth_date }}
+                <span class="mx-2 text-slate-600">|</span>الميلاد: {{ selectedMember.birth_date }}
             </template>
             <template v-if="selectedMember.wife_name">
-                <span class="mx-2 text-slate-500">|</span>
-                الزوجة: {{ selectedMember.wife_name }}
+                <span class="mx-2 text-slate-600">|</span>الزوجة: {{ selectedMember.wife_name }}
             </template>
             <template v-if="selectedMember.description">
-                <span class="mx-2 text-slate-500">|</span>
-                {{ selectedMember.description }}
+                <span class="mx-2 text-slate-600">|</span>{{ selectedMember.description }}
             </template>
         </div>
 
-        <div class="flex justify-center px-2">
+        <!-- Scrollable chart area — horizontal scroll when tree is wider than viewport -->
+        <div class="overflow-x-auto px-4 pb-6 md:px-6">
             <div
                 class="relative rounded-2xl shadow-2xl"
-                style="height: 95vh; width: 100%; background: #1a1a2e"
+                :style="{ background: '#0f172a', height: chartH + 'px', width: chartW + 'px', minWidth: '100%' }"
             >
-                <div
-                    ref="chartContainer"
-                    style="width: 100%; height: 100%"
-                ></div>
+                <div ref="chartContainer" style="width: 100%; height: 100%"></div>
 
+                <!-- Loading overlay -->
                 <div
                     v-if="loading"
                     class="absolute inset-0 flex items-center justify-center rounded-2xl"
-                    style="background: #1a1a2e"
+                    style="background: #0f172a"
                 >
                     <div class="text-center text-slate-400">
                         <div
@@ -268,9 +370,9 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <span class="absolute bottom-3 left-3 text-xs text-slate-500">
-                    انقر على العقدة للتوسيع/الطي · اسحب للتنقل · عجلة الماوس
-                    للتكبير
+                <!-- Hint -->
+                <span class="absolute bottom-2 left-3 text-xs text-slate-600">
+                    انقر للتوسيع/الطي · اسحب للتنقل · عجلة الماوس للتكبير
                 </span>
             </div>
         </div>
