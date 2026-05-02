@@ -284,7 +284,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <Head title="مخطط شجرة العائلة الكامل">
+    <Head title="مخطط شجرة العائلة شبلاق الكامل">
         <link
             href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap"
             rel="stylesheet"
@@ -298,7 +298,7 @@ onUnmounted(() => {
         <!-- Header bar -->
         <div class="z-20 flex shrink-0 flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-3 backdrop-blur md:px-6">
             <div class="flex flex-wrap items-center gap-3">
-                <h1 class="text-lg font-bold text-white sm:text-2xl">مخطط شجرة العائلة الكامل</h1>
+                <h1 class="text-lg font-bold text-white sm:text-2xl">مخطط شجرة العائلة شبلاق الكامل</h1>
                
             </div>
 
