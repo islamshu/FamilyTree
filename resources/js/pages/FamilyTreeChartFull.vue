@@ -20,18 +20,26 @@ const chartContainer = ref<HTMLDivElement | null>(null);
 const loading = ref(true);
 const chartH = ref(window.innerHeight - 130);
 const chartW = ref(window.innerWidth);
-// tracks the deepest generation the user has expanded into
-const visibleDepth = ref(window.innerWidth < 768 ? 1 : 2);
 
-const calcDimensions = () => {
+const getMaxDepth = (node: any, d = 0): number => {
+    if (!node.children?.length) return d;
+    return Math.max(...node.children.map((c: any) => getMaxDepth(c, d + 1)));
+};
+
+const countLeaves = (node: any): number => {
+    if (!node.children?.length) return 1;
+    return node.children.reduce((sum: number, c: any) => sum + countLeaves(c), 0);
+};
+
+const calcDimensions = (maxDepth: number, leafCount: number) => {
     const mobile = window.innerWidth < 768;
     const nodeW = mobile ? 68 : 88;
-    // connector gap: minimal on mobile, comfortable on desktop
-    const gap = mobile ? 10 : 44;
+    const nodeH = mobile ? 22 : 26;
+    const hGap = mobile ? 10 : 44;
+    const vGap = mobile ? 20 : 40;
     const containerW = chartContainer.value?.parentElement?.clientWidth ?? window.innerWidth;
-    chartH.value = window.innerHeight - 130;
-    // canvas grows only as deep as the user has opened — no extra width on first load
-    const needed = (visibleDepth.value + 1) * nodeW + visibleDepth.value * gap + 32;
+    chartH.value = Math.max(600, leafCount * (nodeH + vGap) + 80);
+    const needed = (maxDepth + 1) * nodeW + maxDepth * hGap + 32;
     chartW.value = Math.max(containerW, needed);
 };
 
@@ -40,6 +48,8 @@ let chart: any = null;
 let resizeObserver: ResizeObserver | null = null;
 let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 let lastMobile = window.innerWidth < 768;
+let currentMaxDepth = 0;
+let currentLeafCount = 1;
 
 const buildTree = (flat: FamilyMember[]): FamilyMember[] => {
     const map = new Map<number, any>();
@@ -99,14 +109,8 @@ const triggerZoom = (delta: number) => {
 
 const zoomIn = () => triggerZoom(1);
 const zoomOut = () => triggerZoom(-1);
-const resetView = () => {
-    visibleDepth.value = window.innerWidth < 768 ? 1 : 2;
-    calcDimensions();
-    nextTick(() => {
-        chart?.resize();
-        chart?.dispatchAction({ type: 'restore' });
-    });
-};
+
+
 
 const initChart = async () => {
     echarts = await import('echarts');
@@ -117,13 +121,6 @@ const initChart = async () => {
     chart.on('click', (params: any) => {
         if (params.data?.id) {
             selectedMember.value = findMember(params.data.id, treeData.value);
-            // expand: if user opens a node deeper than current canvas allows, grow it
-            const d: number = params.data.depth ?? 0;
-            if (d + 1 > visibleDepth.value) {
-                visibleDepth.value = d + 1;
-                calcDimensions();
-                nextTick(() => chart?.resize());
-            }
         } else {
             selectedMember.value = null;
         }
@@ -131,7 +128,7 @@ const initChart = async () => {
 
     resizeObserver = new ResizeObserver(() => {
         chart?.resize();
-        calcDimensions();
+        calcDimensions(currentMaxDepth, currentLeafCount);
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             const nowMobile = window.innerWidth < 768;
@@ -198,8 +195,8 @@ const renderChart = () => {
                     symbol: 'roundRect',
                     symbolSize: [nodeW, nodeH],
                     roam: true,
-                    initialTreeDepth: visibleDepth.value,
-                    nodeGap: mobile ? 5 : 8,
+                    initialTreeDepth: -1,
+                    nodeGap: mobile ? 20 : 40,
                     label: {
                         show: true,
                         position: 'inside',
@@ -254,8 +251,14 @@ const fetchData = async () => {
     try {
         const res = await fetch('/api/family-members');
         treeData.value = buildTree(await res.json());
-        visibleDepth.value = window.innerWidth < 768 ? 1 : 2;
-        calcDimensions();
+
+        const roots = treeData.value.map((r) => decorateNodes(r));
+        const virtualRoot =
+            roots.length === 1 ? roots[0] : { children: roots };
+        currentMaxDepth = getMaxDepth(virtualRoot);
+        currentLeafCount = countLeaves(virtualRoot);
+
+        calcDimensions(currentMaxDepth, currentLeafCount);
         await nextTick();
         chart?.resize();
         renderChart();
@@ -281,7 +284,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <Head title="مخطط شجرة العائلة">
+    <Head title="مخطط شجرة العائلة الكامل">
         <link
             href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap"
             rel="stylesheet"
@@ -289,14 +292,14 @@ onUnmounted(() => {
     </Head>
 
     <div
-        class="min-h-screen bg-linear-to-br from-slate-900 via-purple-950 to-slate-900"
+        class="flex h-screen flex-col bg-linear-to-br from-slate-900 via-purple-950 to-slate-900"
         style="font-family: 'Tajawal', sans-serif"
     >
-        <!-- Sticky header bar -->
-        <div class="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-3 backdrop-blur md:px-6">
+        <!-- Header bar -->
+        <div class="z-20 flex shrink-0 flex-wrap items-center justify-between gap-2 bg-slate-900/95 px-4 py-3 backdrop-blur md:px-6">
             <div class="flex flex-wrap items-center gap-3">
-                <h1 class="text-lg font-bold text-white sm:text-2xl">مخطط شجرة العائلة</h1>
-                
+                <h1 class="text-lg font-bold text-white sm:text-2xl">مخطط شجرة العائلة الكامل</h1>
+               
             </div>
 
             <div class="flex items-center gap-1.5">
@@ -308,19 +311,11 @@ onUnmounted(() => {
                 <button
                     @click="zoomOut"
                     class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700 text-lg font-bold text-white transition hover:bg-slate-600 active:scale-95"
-                    title="تصغير"
                 >−</button>
-                <button
-                    @click="resetView"
-                    class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm text-white transition hover:bg-slate-600 active:scale-95"
-                    title="إعادة ضبط العرض"
-                >⟳ إعادة ضبط</button>
+                
+                
                 <Link
-                    href="/tree-chart-full"
-                    class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-600 active:scale-95"
-                >← مشاهدة الشجرة كاملة</Link>
-                <Link
-                    href="/"
+                    href="/tree-chart"
                     class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-600 active:scale-95"
                 >← رجوع</Link>
             </div>
@@ -345,8 +340,8 @@ onUnmounted(() => {
             </template>
         </div>
 
-        <!-- Scrollable chart area — horizontal scroll when tree is wider than viewport -->
-        <div class="overflow-x-auto px-4 pb-6 md:px-6">
+        <!-- Scrollable chart area — both axes -->
+        <div class="flex-1 overflow-auto px-4 pb-6 md:px-6">
             <div
                 class="relative rounded-2xl shadow-2xl"
                 :style="{ background: '#0f172a', height: chartH + 'px', width: chartW + 'px', minWidth: '100%' }"
@@ -369,7 +364,7 @@ onUnmounted(() => {
 
                 <!-- Hint -->
                 <span class="absolute bottom-2 left-3 text-xs text-slate-600">
-                    انقر للتوسيع/الطي · اسحب للتنقل · عجلة الماوس للتكبير
+                    انقر للطي/التوسيع · اسحب للتنقل · عجلة الماوس للتكبير
                 </span>
             </div>
         </div>

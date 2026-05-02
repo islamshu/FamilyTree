@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
-import { ref, onMounted, onUnmounted } from 'vue';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+
+const authUser = computed(() => (usePage().props.auth as any)?.user ?? null);
 
 interface FamilyMember {
     id?: number;
@@ -413,7 +415,7 @@ const submitForm = async () => {
         const method = form.value.id ? 'PUT' : 'POST';
         await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(form.value),
         });
 
@@ -440,6 +442,7 @@ const deleteMember = async () => {
             `/api/family-members/${selectedMember.value.id}`,
             {
                 method: 'DELETE',
+                headers: { Accept: 'application/json' },
             },
         );
         if (!res.ok) {
@@ -474,6 +477,7 @@ const deleteMember = async () => {
             <div class="flex items-center gap-3">
                 <h1 class="text-xl font-bold text-white sm:text-3xl">شجرة العائلة</h1>
                 <button
+                    v-if="authUser"
                     @click="openForm()"
                     class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 sm:px-4 sm:py-2"
                 >
@@ -481,7 +485,7 @@ const deleteMember = async () => {
                 </button>
             </div>
             <div class="flex items-center gap-2">
-                <span class="hidden text-sm text-slate-400 sm:inline"
+                <span v-if="authUser" class="hidden text-sm text-slate-400 sm:inline"
                     >انقر على أي شخص لتعديل بياناته</span
                 >
                 <Link
@@ -490,6 +494,20 @@ const deleteMember = async () => {
                 >
                     عرض مخطط الشجرة →
                 </Link>
+                <Link
+                    v-if="!authUser"
+                    href="/login"
+                    class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-700 sm:px-4 sm:py-2"
+                >
+                    تسجيل الدخول
+                </Link>
+                <button
+                    v-if="authUser"
+                    @click="router.post('/logout')"
+                    class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-600 sm:px-4 sm:py-2"
+                >
+                    خروج
+                </button>
             </div>
         </div>
 
@@ -501,7 +519,7 @@ const deleteMember = async () => {
                 <span class="text-sm">تم الاختيار:</span>
                 <strong class="text-sm">{{ selectedMember.name }}</strong>
             </div>
-            <div class="flex flex-wrap gap-1">
+            <div v-if="authUser" class="flex flex-wrap gap-1">
                 <button
                     @click="openFormForUpdate"
                     class="rounded bg-emerald-500 px-2 py-1 text-xs text-white hover:bg-emerald-600 sm:px-3 sm:text-sm"
